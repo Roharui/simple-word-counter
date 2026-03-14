@@ -22,7 +22,6 @@
   position: fixed;
   right: 5px;
   bottom: 5px;
-  transform: translateX(-50%);
   z-index: 20;
   width: fit-content;
   margin: 0;
