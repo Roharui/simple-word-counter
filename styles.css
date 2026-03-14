@@ -20,7 +20,7 @@
 
 .cwc-editor-counter {
   position: fixed;
-  left: 50%;
+  right: 5px;
   bottom: 5px;
   transform: translateX(-50%);
   z-index: 20;
