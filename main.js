@@ -195,7 +195,17 @@ class CustomWordCounterSettingTab extends PluginSettingTab {
       .setName("Excluded regex patterns")
       .setDesc(
         "Define multiple regex patterns to remove before character counting. Use plain patterns like \\\\s or /pattern/flags."
-      );
+      )
+      .addButton((button) => {
+        button
+          .setButtonText("Add regex")
+          .setCta()
+          .onClick(async () => {
+            this.plugin.settings.excludeRegexPatterns.push("");
+            await this.plugin.saveSettings();
+            renderRows();
+          });
+      });
 
     const helpEl = containerEl.createEl("div", {
       cls: "cwc-regex-help",
@@ -232,16 +242,6 @@ class CustomWordCounterSettingTab extends PluginSettingTab {
 
     renderRows();
 
-    new Setting(containerEl).addButton((button) => {
-      button
-        .setButtonText("Add regex")
-        .setCta()
-        .onClick(async () => {
-          this.plugin.settings.excludeRegexPatterns.push("");
-          await this.plugin.saveSettings();
-          renderRows();
-        });
-    });
   }
 }
 
