@@ -1,4 +1,4 @@
-# Custom Word Counter
+# Simple Word Counter
 
 Obsidian plugin that counts characters in the current note, with customizable regex-based exclusions.
 
@@ -23,17 +23,17 @@ Obsidian plugin that counts characters in the current note, with customizable re
    - `manifest.json`
    - `styles.css`
 4. Reload Obsidian.
-5. Go to **Settings -> Community plugins** and enable **Custom Word Counter**.
+5. Go to **Settings -> Community plugins** and enable **Simple Word Counter**.
 
 ## Usage
 
 - Open any markdown note.
 - The floating `Chars: N` indicator updates automatically as you type.
-- Run command palette action: **Custom Word Counter: Show character count** to display a notice.
+- Run command palette action: **Simple Word Counter: Show character count** to display a notice.
 
 ## Settings
 
-Path: **Settings -> Community plugins -> Custom Word Counter**
+Path: **Settings -> Community plugins -> Simple Word Counter**
 
 - Add one or more regex patterns to exclude from counting.
 - You can use either:

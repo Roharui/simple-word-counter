@@ -1,6 +1,6 @@
 {
   "id": "custom-word-counter",
-  "name": "Custom Word Counter",
+  "name": "Simple Word Counter",
   "version": "1.0.0",
   "minAppVersion": "1.4.0",
   "description": "Count characters in the current note with support for multiple exclusion regex patterns.",

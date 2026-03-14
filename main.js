@@ -189,7 +189,7 @@ class CustomWordCounterSettingTab extends PluginSettingTab {
     const { containerEl } = this;
     containerEl.empty();
 
-    containerEl.createEl("h2", { text: "Custom Word Counter" });
+    containerEl.createEl("h2", { text: "Simple Word Counter" });
 
     new Setting(containerEl)
       .setName("Excluded regex patterns")
