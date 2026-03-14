@@ -1,0 +1,41 @@
+.cwc-regex-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.cwc-regex-row {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 8px;
+  align-items: center;
+}
+
+.cwc-regex-help {
+  color: var(--text-muted);
+  font-size: var(--font-ui-smaller);
+  margin-top: 4px;
+}
+
+.cwc-editor-counter {
+  position: fixed;
+  left: 50%;
+  bottom: 5px;
+  transform: translateX(-50%);
+  z-index: 20;
+  width: fit-content;
+  margin: 0;
+  padding: 3px 10px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 999px;
+  font-size: var(--font-ui-small);
+  color: var(--text-muted);
+  background: var(--background-secondary);
+  user-select: none;
+  pointer-events: none;
+}
+
+.cwc-counter-anchor {
+  position: relative;
+}
