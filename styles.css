@@ -41,6 +41,7 @@
 
 .cwc-editor-counter--success {
   border-color: #27ae60;
+  box-shadow: 0 0 0 1px rgba(39, 174, 96, 0.35) inset;
 }
 
 .cwc-editor-counter-top {

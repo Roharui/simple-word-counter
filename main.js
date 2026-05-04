@@ -4,6 +4,7 @@ const DEFAULT_SETTINGS = {
   excludeRegexPatterns: ["\\s"],
   targetCharacterCount: "",
   uploadScheduledAt: "",
+  uploadScheduledAtPropertyName: "uploadScheduledAt",
   filterPropertyName: "",
   filterPropertyValue: "",
   writingStartedAt: "",
@@ -73,6 +74,14 @@ class CustomWordCounterPlugin extends Plugin {
 
     if (typeof this.settings.writingStartedAt !== "string") {
       this.settings.writingStartedAt = DEFAULT_SETTINGS.writingStartedAt;
+    }
+
+    if (typeof this.settings.uploadScheduledAt !== "string") {
+      this.settings.uploadScheduledAt = DEFAULT_SETTINGS.uploadScheduledAt;
+    }
+
+    if (typeof this.settings.uploadScheduledAtPropertyName !== "string") {
+      this.settings.uploadScheduledAtPropertyName = DEFAULT_SETTINGS.uploadScheduledAtPropertyName;
     }
   }
 
@@ -159,13 +168,33 @@ class CustomWordCounterPlugin extends Plugin {
     return target;
   }
 
+  formatLocalDatetimeInput(date) {
+    if (!(date instanceof Date) || Number.isNaN(date.getTime())) {
+      return "";
+    }
+
+    const pad = (value) => String(value).padStart(2, "0");
+    return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
+  }
+
+  withTodayDate(date) {
+    const nextDate = new Date(date);
+    if (Number.isNaN(nextDate.getTime())) {
+      return new Date();
+    }
+
+    const now = new Date();
+    nextDate.setFullYear(now.getFullYear(), now.getMonth(), now.getDate());
+    return nextDate;
+  }
+
   getUploadScheduledAt() {
-    const rawDateTime = this.settings.uploadScheduledAt;
-    if (!rawDateTime || typeof rawDateTime !== "string") {
+    const rawTime = this.settings.uploadScheduledAt;
+    if (!rawTime || typeof rawTime !== "string") {
       return null;
     }
 
-    const timeParts = rawDateTime.trim().split(":").map((part) => Number(part));
+    const timeParts = rawTime.trim().split(":").map((part) => Number(part));
     if (timeParts.length < 2 || timeParts.some((part) => !Number.isFinite(part))) {
       return null;
     }
@@ -174,6 +203,31 @@ class CustomWordCounterPlugin extends Plugin {
     const scheduledAt = new Date();
     scheduledAt.setHours(hours, minutes, seconds, 0);
 
+    if (Number.isNaN(scheduledAt.getTime())) {
+      return null;
+    }
+
+    return scheduledAt;
+  }
+
+  getFileUploadScheduledAt() {
+    const view = this.getActiveMarkdownView();
+    if (!view || !view.file) {
+      return null;
+    }
+
+    const cache = this.app.metadataCache.getFileCache(view.file);
+    if (!cache || !cache.frontmatter) {
+      return null;
+    }
+
+    const propertyName = this.settings.uploadScheduledAtPropertyName || "uploadScheduledAt";
+    const rawDateTime = cache.frontmatter[propertyName];
+    if (!rawDateTime || typeof rawDateTime !== "string") {
+      return null;
+    }
+
+    const scheduledAt = new Date(rawDateTime);
     if (Number.isNaN(scheduledAt.getTime())) {
       return null;
     }
@@ -228,7 +282,7 @@ class CustomWordCounterPlugin extends Plugin {
 
   getRequiredCharsPerHour(characterCount) {
     const target = this.getTargetCharacterCount();
-    const uploadAt = this.getUploadScheduledAt();
+    const uploadAt = this.getFileUploadScheduledAt() || this.getUploadScheduledAt();
     if (!target || !uploadAt) {
       return null;
     }
@@ -255,7 +309,7 @@ class CustomWordCounterPlugin extends Plugin {
   getCrossingTime(characterCount) {
     const startedAt = this.getWritingStartedAt();
     const target = this.getTargetCharacterCount();
-    const uploadAt = this.getUploadScheduledAt();
+    const uploadAt = this.getFileUploadScheduledAt() || this.getUploadScheduledAt();
     if (!startedAt || !target || !uploadAt) {
       return null;
     }
@@ -292,7 +346,7 @@ class CustomWordCounterPlugin extends Plugin {
 
   getWeightedRatioValue(characterCount) {
     const targetCharacterCount = this.getTargetCharacterCount();
-    const uploadScheduledAt = this.getUploadScheduledAt();
+    const uploadScheduledAt = this.getFileUploadScheduledAt() || this.getUploadScheduledAt();
 
     if (!targetCharacterCount || !uploadScheduledAt) {
       return null;
@@ -426,21 +480,24 @@ class CustomWordCounterPlugin extends Plugin {
 
     const count = await this.getCurrentCharacterCount();
     const writingSpeed = this.getWritingSpeedText(count);
-    const uploadScheduledAt = this.getUploadScheduledAt();
-    const shouldWarn =
-      uploadScheduledAt && uploadScheduledAt.getTime() < Date.now() && count < 3000;
+
+    const uploadScheduledAt = this.getFileUploadScheduledAt() || this.getUploadScheduledAt();
     const targetCount = this.getTargetCharacterCount();
+
+    const shouldWarn =
+      uploadScheduledAt && uploadScheduledAt.getTime() < Date.now() && count < targetCount;
     const shouldSuccess = targetCount && count >= targetCount;
 
     counterEl.classList.toggle("cwc-editor-counter--warning", shouldWarn);
     counterEl.classList.toggle("cwc-editor-counter--success", shouldSuccess);
+    speedEl.classList.toggle("cwc-editor-counter--success", shouldSuccess);
 
     // Main counter text (bottom)
     counterEl.setText(`${count} ${targetCount ? `/ ${targetCount}` : ""}`);
 
     // Speed / requirement / crossing (top)
     const speedParts = [];
-    if (writingSpeed) {
+    if (writingSpeed !== null) {
       speedParts.push(`${writingSpeed} ch/h`);
     }
     const requiredSpeed = this.getRequiredCharsPerHour(count);
@@ -450,12 +507,18 @@ class CustomWordCounterPlugin extends Plugin {
       speedParts.push(` ${requiredSpeed} ch/h`);
     }
     const crossing = this.getCrossingTime(count);
-    if (crossing instanceof Date) {
+    if (requiredSpeed && writingSpeed !== null && requiredSpeed > writingSpeed) {
+      speedParts.push('⚠️');
+    } else if (crossing instanceof Date) {
       const crossText = this.formatClockText(crossing);
-      if (crossText) {
+      if (shouldSuccess) {
+        speedEl.setText('✅');
+      }
+      else if (crossText) {
         speedParts.push(` ${crossText}`);
       }
     }
+
     speedEl.setText(speedParts.join(' | '));
   }
 }
@@ -548,6 +611,18 @@ class CustomWordCounterSettingTab extends PluginSettingTab {
         text.setValue(this.plugin.settings.uploadScheduledAt || "");
         text.onChange(async (value) => {
           this.plugin.settings.uploadScheduledAt = value;
+          await this.plugin.saveSettings();
+        });
+      });
+
+    new Setting(containerEl)
+      .setName("File upload scheduled at property")
+      .setDesc("Frontmatter property name for per-file upload datetime (e.g., uploadScheduledAt, deadline).")
+      .addText((text) => {
+        text.setPlaceholder("uploadScheduledAt");
+        text.setValue(this.plugin.settings.uploadScheduledAtPropertyName || "");
+        text.onChange(async (value) => {
+          this.plugin.settings.uploadScheduledAtPropertyName = value || DEFAULT_SETTINGS.uploadScheduledAtPropertyName;
           await this.plugin.saveSettings();
         });
       });
