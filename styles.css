@@ -36,11 +36,11 @@
 }
 
 .cwc-editor-counter--warning {
-  border-color: #e74c3c;
+  border-color: #e74c3c !important;
 }
 
 .cwc-editor-counter--success {
-  border-color: #27ae60;
+  border-color: #27ae60 !important;
   box-shadow: 0 0 0 1px rgba(39, 174, 96, 0.35) inset;
 }
 

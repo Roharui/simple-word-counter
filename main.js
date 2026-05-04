@@ -118,37 +118,29 @@ class CustomWordCounterPlugin extends Plugin {
   }
 
   async getCurrentCharacterCount() {
-    const filterPropertyName = this.settings.filterPropertyName?.trim();
-    const filterPropertyValue = this.settings.filterPropertyValue?.trim();
+    let totalCount = 0;
+    const filteredFiles = this.getFilteredMarkdownFiles();
 
-    if (!filterPropertyName || !filterPropertyValue) {
-      // No filter: count only the active file
+    for (const file of filteredFiles) {
+      totalCount += await this.getFileCharacterCount(file);
+    }
+
+    return totalCount;
+  }
+
+  async getFileCharacterCount(file) {
+    const activeFile = this.getActiveMarkdownView()?.file ?? null;
+    if (activeFile && file.path === activeFile.path) {
       const editor = this.getActiveEditor();
       if (!editor) {
         return 0;
       }
-      const text = editor.getValue();
-      return this.countCharacters(text);
+
+      return this.countCharacters(editor.getValue());
     }
 
-    // Filter enabled: count all files with matching frontmatter property
-    let totalCount = 0;
-    const markdownFiles = this.app.vault.getMarkdownFiles();
-
-    for (const file of markdownFiles) {
-      const cache = this.app.metadataCache.getFileCache(file);
-      if (!cache || !cache.frontmatter) {
-        continue;
-      }
-
-      const propertyValue = cache.frontmatter[filterPropertyName];
-      if (String(propertyValue) === filterPropertyValue) {
-        const content = await this.app.vault.read(file);
-        totalCount += this.countCharacters(content);
-      }
-    }
-
-    return totalCount;
+    const content = await this.app.vault.read(file);
+    return this.countCharacters(content);
   }
 
   countCharacters(text) {
@@ -219,17 +211,17 @@ class CustomWordCounterPlugin extends Plugin {
     return scheduledAt;
   }
 
-  getTargetFrontmatterFile() {
+  getFilteredMarkdownFiles() {
     const filterPropertyName = this.settings.filterPropertyName?.trim();
     const filterPropertyValue = this.settings.filterPropertyValue?.trim();
+    const activeFile = this.getActiveMarkdownView()?.file ?? null;
 
     if (!filterPropertyName || !filterPropertyValue) {
-      const view = this.getActiveMarkdownView();
-      return view?.file ?? null;
+      return activeFile ? [activeFile] : [];
     }
 
     const markdownFiles = this.app.vault.getMarkdownFiles();
-    const activeFile = this.getActiveMarkdownView()?.file ?? null;
+    const matchedFiles = [];
 
     for (const file of markdownFiles) {
       const cache = this.app.metadataCache.getFileCache(file);
@@ -240,14 +232,23 @@ class CustomWordCounterPlugin extends Plugin {
       const propertyValue = cache.frontmatter[filterPropertyName];
       if (String(propertyValue) === filterPropertyValue) {
         if (activeFile && file.path === activeFile.path) {
-          return file;
+          return [activeFile];
         }
 
-        return file;
+        matchedFiles.push(file);
       }
     }
 
-    return activeFile;
+    if (matchedFiles.length > 0) {
+      return matchedFiles;
+    }
+
+    return activeFile ? [activeFile] : [];
+  }
+
+  getTargetFrontmatterFile() {
+    const filteredFiles = this.getFilteredMarkdownFiles();
+    return filteredFiles[0] ?? null;
   }
 
   getFileUploadScheduledAt() {
@@ -541,6 +542,7 @@ class CustomWordCounterPlugin extends Plugin {
 
     counterEl.classList.toggle("cwc-editor-counter--warning", shouldWarn);
     counterEl.classList.toggle("cwc-editor-counter--success", shouldSuccess);
+    speedEl.classList.toggle("cwc-editor-counter--warning", shouldWarn);
     speedEl.classList.toggle("cwc-editor-counter--success", shouldSuccess);
 
     // Main counter text (bottom)
@@ -548,29 +550,35 @@ class CustomWordCounterPlugin extends Plugin {
 
     // Speed / requirement / crossing (top)
     const speedParts = [];
+
     if (writingSpeed !== null) {
       speedParts.push(`${writingSpeed} ch/h`);
     }
+    
     const requiredSpeed = this.getRequiredCharsPerHour(count);
+
     if (requiredSpeed === 0) {
       speedParts.push(` 0 ch/h`);
     } else if (requiredSpeed !== null) {
       speedParts.push(` ${requiredSpeed} ch/h`);
     }
+    
     const crossing = this.getCrossingTime(count);
+
     if (requiredSpeed && writingSpeed !== null && requiredSpeed > writingSpeed) {
       speedParts.push('⚠️');
     } else if (crossing instanceof Date) {
       const crossText = this.formatClockText(crossing);
-      if (shouldSuccess) {
-        speedEl.setText('✅');
-      }
-      else if (crossText) {
+
+      if (crossText) {
         speedParts.push(` ${crossText}`);
       }
+    } 
+    if (shouldSuccess) {
+    speedEl.setText("✅");
+    } else {
+      speedEl.setText(speedParts.join(' | '));
     }
-
-    speedEl.setText(speedParts.join(' | '));
   }
 }
 
