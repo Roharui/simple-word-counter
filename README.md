@@ -1,10 +1,11 @@
 # Simple Word Counter
 
-Obsidian plugin that counts characters in the current note, with customizable regex-based exclusions.
+Obsidian plugin that counts characters in the current note, with customizable regex-based exclusions and a ratio display based on a target character count and scheduled upload time.
 
 ## Features
 
 - Shows current character count in a floating counter at the bottom center of the editor.
+- Shows a time-formatted ratio using the formula `(current character count / target character count) * (scheduled upload time - current time)`.
 - Adds a command: **Show character count**.
 - Supports multiple exclusion regex patterns before counting.
 - Ignores invalid regex entries safely.
@@ -28,13 +29,15 @@ Obsidian plugin that counts characters in the current note, with customizable re
 ## Usage
 
 - Open any markdown note.
-- The floating `Chars: N` indicator updates automatically as you type.
-- Run command palette action: **Simple Word Counter: Show character count** to display a notice.
+- The floating `Chars: N | Ratio: hh:mm:ss` indicator updates automatically as you type when the ratio settings are filled in.
+- Run command palette action: **Simple Word Counter: Show character count** to display a notice with the same values.
 
 ## Settings
 
 Path: **Settings -> Community plugins -> Simple Word Counter**
 
+- Set the target character count.
+- Set today's planned upload time.
 - Add one or more regex patterns to exclude from counting.
 - You can use either:
   - Plain pattern (example: `\\s`)

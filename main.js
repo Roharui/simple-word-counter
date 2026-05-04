@@ -2,18 +2,25 @@ const { Plugin, PluginSettingTab, Setting, Notice, MarkdownView } = require("obs
 
 const DEFAULT_SETTINGS = {
   excludeRegexPatterns: ["\\s"],
+  targetCharacterCount: "",
+  uploadScheduledAt: "",
 };
 
 class CustomWordCounterPlugin extends Plugin {
   async onload() {
     await this.loadSettings();
 
+    this.counterRefreshTimer = window.setInterval(() => {
+      this.updateEditorCounter();
+    }, 1000);
+
     this.addCommand({
       id: "show-character-count",
       name: "Show character count",
       callback: () => {
         const count = this.getCurrentCharacterCount();
-        new Notice(`Character count: ${count}`);
+        const ratioText = this.getWeightedRatioText(count);
+        new Notice(`Character count: ${count}${ratioText ? ` | Ratio: ${ratioText}` : ""}`);
       },
     });
 
@@ -36,6 +43,11 @@ class CustomWordCounterPlugin extends Plugin {
   }
 
   onunload() {
+    if (this.counterRefreshTimer) {
+      window.clearInterval(this.counterRefreshTimer);
+      this.counterRefreshTimer = null;
+    }
+
     this.clearAllEditorCounters();
   }
 
@@ -88,6 +100,83 @@ class CustomWordCounterPlugin extends Plugin {
     }
 
     return filteredText.length;
+  }
+
+  getTargetCharacterCount() {
+    const rawTarget = this.settings.targetCharacterCount;
+    const target = Number(rawTarget);
+
+    if (!Number.isFinite(target) || target <= 0) {
+      return null;
+    }
+
+    return target;
+  }
+
+  getUploadScheduledAt() {
+    const rawDateTime = this.settings.uploadScheduledAt;
+    if (!rawDateTime || typeof rawDateTime !== "string") {
+      return null;
+    }
+
+    const timeParts = rawDateTime.trim().split(":").map((part) => Number(part));
+    if (timeParts.length < 2 || timeParts.some((part) => !Number.isFinite(part))) {
+      return null;
+    }
+
+    const [hours, minutes, seconds = 0] = timeParts;
+    const scheduledAt = new Date();
+    scheduledAt.setHours(hours, minutes, seconds, 0);
+
+    if (Number.isNaN(scheduledAt.getTime())) {
+      return null;
+    }
+
+    return scheduledAt;
+  }
+
+  getWeightedRatioValue(characterCount) {
+    const targetCharacterCount = this.getTargetCharacterCount();
+    const uploadScheduledAt = this.getUploadScheduledAt();
+
+    if (!targetCharacterCount || !uploadScheduledAt) {
+      return null;
+    }
+
+    const remainingMilliseconds = uploadScheduledAt.getTime() - Date.now();
+    return (characterCount / targetCharacterCount) * remainingMilliseconds;
+  }
+
+  getWeightedRatioText(characterCount) {
+    const ratioValue = this.getWeightedRatioValue(characterCount);
+    if (ratioValue === null) {
+      return null;
+    }
+
+    return this.formatDurationText(ratioValue);
+  }
+
+  formatDurationText(milliseconds) {
+    if (!Number.isFinite(milliseconds)) {
+      return null;
+    }
+
+    const sign = milliseconds < 0 ? "-" : "";
+    let remainingSeconds = Math.round(Math.abs(milliseconds) / 1000);
+
+    const hours = Math.floor(remainingSeconds / 3600);
+    remainingSeconds -= hours * 3600;
+
+    const minutes = Math.floor(remainingSeconds / 60);
+    remainingSeconds -= minutes * 60;
+
+    const seconds = remainingSeconds;
+
+    const paddedHours = String(hours).padStart(2, "0");
+    const paddedMinutes = String(minutes).padStart(2, "0");
+    const paddedSeconds = String(seconds).padStart(2, "0");
+
+    return `${sign}${paddedHours}:${paddedMinutes}:${paddedSeconds}`;
   }
 
   parseRegexInput(rawPattern) {
@@ -175,7 +264,8 @@ class CustomWordCounterPlugin extends Plugin {
     }
 
     const count = this.countCharacters(editor.getValue());
-    counterEl.setText(`Chars: ${count}`);
+    const ratioText = this.getWeightedRatioText(count);
+    counterEl.setText(`Chars: ${count}${ratioText ? ` | ${ratioText}` : ""}`);
   }
 }
 
@@ -190,6 +280,32 @@ class CustomWordCounterSettingTab extends PluginSettingTab {
     containerEl.empty();
 
     containerEl.createEl("h2", { text: "Simple Word Counter" });
+
+    new Setting(containerEl)
+      .setName("Target character count")
+      .setDesc("Used together with the upload time to calculate the displayed ratio.")
+      .addText((text) => {
+        text.inputEl.type = "number";
+        text.inputEl.min = "0";
+        text.setPlaceholder("Example: 1000");
+        text.setValue(this.plugin.settings.targetCharacterCount || "");
+        text.onChange(async (value) => {
+          this.plugin.settings.targetCharacterCount = value;
+          await this.plugin.saveSettings();
+        });
+      });
+
+    new Setting(containerEl)
+      .setName("Upload scheduled time")
+      .setDesc("Choose today's planned upload time used in the ratio calculation.")
+      .addText((text) => {
+        text.inputEl.type = "time";
+        text.setValue(this.plugin.settings.uploadScheduledAt || "");
+        text.onChange(async (value) => {
+          this.plugin.settings.uploadScheduledAt = value;
+          await this.plugin.saveSettings();
+        });
+      });
 
     new Setting(containerEl)
       .setName("Excluded regex patterns")
