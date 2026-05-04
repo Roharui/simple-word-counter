@@ -9,6 +9,7 @@ Obsidian plugin that counts characters in the current note, with customizable re
 - Adds a command: **Show character count**.
 - Supports multiple exclusion regex patterns before counting.
 - Ignores invalid regex entries safely.
+- Can periodically send the current target file info to a server.
 
 ## Default Behavior
 
@@ -39,10 +40,12 @@ Path: **Settings -> Community plugins -> Simple Word Counter**
 - Set the target character count.
 - Set today's planned upload time.
 - Add one or more regex patterns to exclude from counting.
+- Enable periodic file info upload and enter the server IP or address.
 - You can use either:
   - Plain pattern (example: `\\s`)
   - Slash format with flags (example: `/#[^\\n]*/g`)
 - Invalid regex patterns are ignored.
+- The file info upload sends `file_name` and `char_count` to `http://<server>/api/record` by default.
 
 ## Development Notes
 

@@ -8,6 +8,8 @@ const DEFAULT_SETTINGS = {
   filterPropertyName: "",
   filterPropertyValue: "",
   writingStartedAtPropertyName: "writingStartedAt",
+  enableFileInfoUpload: false,
+  fileInfoServerIp: "",
 };
 
 class CustomWordCounterPlugin extends Plugin {
@@ -17,6 +19,8 @@ class CustomWordCounterPlugin extends Plugin {
     this.counterRefreshTimer = window.setInterval(() => {
       this.updateEditorCounter().catch(err => console.error("Counter update error:", err));
     }, 1000);
+
+    this.refreshFileInfoUploadTimer();
 
     this.addCommand({
       id: "show-character-count",
@@ -71,6 +75,11 @@ class CustomWordCounterPlugin extends Plugin {
       this.counterRefreshTimer = null;
     }
 
+    if (this.fileInfoUploadTimer) {
+      window.clearInterval(this.fileInfoUploadTimer);
+      this.fileInfoUploadTimer = null;
+    }
+
     this.clearAllEditorCounters();
   }
 
@@ -92,11 +101,20 @@ class CustomWordCounterPlugin extends Plugin {
     if (typeof this.settings.writingStartedAtPropertyName !== "string") {
       this.settings.writingStartedAtPropertyName = DEFAULT_SETTINGS.writingStartedAtPropertyName;
     }
+
+    if (typeof this.settings.enableFileInfoUpload !== "boolean") {
+      this.settings.enableFileInfoUpload = DEFAULT_SETTINGS.enableFileInfoUpload;
+    }
+
+    if (typeof this.settings.fileInfoServerIp !== "string") {
+      this.settings.fileInfoServerIp = DEFAULT_SETTINGS.fileInfoServerIp;
+    }
   }
 
   async saveSettings() {
     await this.saveData(this.settings);
     await this.updateEditorCounter();
+    this.refreshFileInfoUploadTimer();
   }
 
   async syncEditorCounters() {
@@ -115,6 +133,73 @@ class CustomWordCounterPlugin extends Plugin {
     }
 
     return activeView.editor;
+  }
+
+  refreshFileInfoUploadTimer() {
+    if (this.fileInfoUploadTimer) {
+      window.clearInterval(this.fileInfoUploadTimer);
+      this.fileInfoUploadTimer = null;
+    }
+
+    if (!this.settings.enableFileInfoUpload) {
+      return;
+    }
+
+    this.fileInfoUploadTimer = window.setInterval(() => {
+      this.uploadActiveFileInfo().catch(err => console.error("File info upload error:", err));
+    }, 60000);
+
+    this.uploadActiveFileInfo().catch(err => console.error("File info upload error:", err));
+  }
+
+  getFileInfoServerUrl() {
+    const rawAddress = this.settings.fileInfoServerIp?.trim();
+    if (!rawAddress) {
+      return null;
+    }
+
+    try {
+      const normalizedAddress = /^https?:\/\//i.test(rawAddress) ? rawAddress : `http://${rawAddress}`;
+      const url = new URL(normalizedAddress);
+      url.pathname = "/api/record";
+
+      return url.toString();
+    } catch (_error) {
+      return null;
+    }
+  }
+
+  async uploadActiveFileInfo() {
+    if (!this.settings.enableFileInfoUpload) {
+      return;
+    }
+
+    const file = this.getTargetFrontmatterFile();
+    const serverUrl = this.getFileInfoServerUrl();
+
+    if (!file || !serverUrl) {
+      return;
+    }
+
+    const cache = this.app.metadataCache.getFileCache(file);
+    const count = await this.getCurrentCharacterCount();
+
+    const payload = {
+      file_name: file.basename,
+      char_count: count,
+    };
+
+    const response = await fetch(serverUrl, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(payload),
+    });
+
+    if (!response.ok) {
+      throw new Error(`Server returned ${response.status}`);
+    }
   }
 
   async getCurrentCharacterCount() {
@@ -605,6 +690,32 @@ class CustomWordCounterSettingTab extends PluginSettingTab {
     containerEl.empty();
 
     containerEl.createEl("h2", { text: "Simple Word Counter" });
+
+
+    containerEl.createEl("h3", { text: "File Info Upload" });
+
+    new Setting(containerEl)
+      .setName("Enable file info upload")
+      .setDesc("Periodically sends the current target file info to the server.")
+      .addToggle((toggle) => {
+        toggle.setValue(!!this.plugin.settings.enableFileInfoUpload);
+        toggle.onChange(async (value) => {
+          this.plugin.settings.enableFileInfoUpload = value;
+          await this.plugin.saveSettings();
+        });
+      });
+
+    new Setting(containerEl)
+      .setName("Server IP or address")
+      .setDesc("Example: 192.168.0.10:3000 or http://192.168.0.10:3000")
+      .addText((text) => {
+        text.setPlaceholder("192.168.0.10:3000");
+        text.setValue(this.plugin.settings.fileInfoServerIp || "");
+        text.onChange(async (value) => {
+          this.plugin.settings.fileInfoServerIp = value;
+          await this.plugin.saveSettings();
+        });
+      });
 
     containerEl.createEl("h3", { text: "Target File" });
 
