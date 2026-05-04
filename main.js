@@ -37,7 +37,7 @@ class CustomWordCounterPlugin extends Plugin {
           new Notice("No file is currently open.");
           return;
         }
-        
+
         const propertyName = this.settings.writingStartedAtPropertyName || "writingStartedAt";
         const currentTime = new Date().toISOString();
         await this.app.fileManager.processFrontmatter(view.file, (frontmatter) => {
@@ -253,7 +253,9 @@ class CustomWordCounterPlugin extends Plugin {
 
   getFileUploadScheduledAt() {
     const file = this.getTargetFrontmatterFile();
-    if (!file) {
+    const rawTime = this.settings.uploadScheduledAt;
+
+    if (!file || !rawTime || typeof rawTime !== "string") {
       return null;
     }
 
@@ -268,7 +270,16 @@ class CustomWordCounterPlugin extends Plugin {
       return null;
     }
 
+    const timeParts = rawTime.trim().split(":").map((part) => Number(part));
+    if (timeParts.length < 2 || timeParts.some((part) => !Number.isFinite(part))) {
+      return null;
+    }
+
     const scheduledAt = new Date(rawDateTime);
+
+    const [hours, minutes, seconds = 0] = timeParts;
+    scheduledAt.setHours(hours, minutes, seconds, 0);
+
     if (Number.isNaN(scheduledAt.getTime())) {
       return null;
     }
@@ -554,7 +565,7 @@ class CustomWordCounterPlugin extends Plugin {
     if (writingSpeed !== null) {
       speedParts.push(`${writingSpeed} ch/h`);
     }
-    
+
     const requiredSpeed = this.getRequiredCharsPerHour(count);
 
     if (requiredSpeed === 0) {
@@ -562,7 +573,7 @@ class CustomWordCounterPlugin extends Plugin {
     } else if (requiredSpeed !== null) {
       speedParts.push(` ${requiredSpeed} ch/h`);
     }
-    
+
     const crossing = this.getCrossingTime(count);
 
     if (requiredSpeed && writingSpeed !== null && requiredSpeed > writingSpeed) {
@@ -573,9 +584,10 @@ class CustomWordCounterPlugin extends Plugin {
       if (crossText) {
         speedParts.push(` ${crossText}`);
       }
-    } 
+    }
+
     if (shouldSuccess) {
-    speedEl.setText("✅");
+      speedEl.setText("✅");
     } else {
       speedEl.setText(speedParts.join(' | '));
     }
