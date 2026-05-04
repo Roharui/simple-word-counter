@@ -7,7 +7,7 @@ const DEFAULT_SETTINGS = {
   uploadScheduledAtPropertyName: "uploadScheduledAt",
   filterPropertyName: "",
   filterPropertyValue: "",
-  writingStartedAt: "",
+  writingStartedAtPropertyName: "writingStartedAt",
 };
 
 class CustomWordCounterPlugin extends Plugin {
@@ -32,9 +32,18 @@ class CustomWordCounterPlugin extends Plugin {
       id: "mark-writing-start",
       name: "Mark writing start",
       callback: async () => {
-        this.settings.writingStartedAt = new Date().toISOString();
-        await this.saveSettings();
-        new Notice("Writing start time saved.");
+        const view = this.getActiveMarkdownView();
+        if (!view || !view.file) {
+          new Notice("No file is currently open.");
+          return;
+        }
+        
+        const propertyName = this.settings.writingStartedAtPropertyName || "writingStartedAt";
+        const currentTime = new Date().toISOString();
+        await this.app.fileManager.processFrontmatter(view.file, (frontmatter) => {
+          frontmatter[propertyName] = currentTime;
+        });
+        new Notice("Writing start time saved to file frontmatter.");
       },
     });
 
@@ -72,16 +81,16 @@ class CustomWordCounterPlugin extends Plugin {
       this.settings.excludeRegexPatterns = [...DEFAULT_SETTINGS.excludeRegexPatterns];
     }
 
-    if (typeof this.settings.writingStartedAt !== "string") {
-      this.settings.writingStartedAt = DEFAULT_SETTINGS.writingStartedAt;
-    }
-
     if (typeof this.settings.uploadScheduledAt !== "string") {
       this.settings.uploadScheduledAt = DEFAULT_SETTINGS.uploadScheduledAt;
     }
 
     if (typeof this.settings.uploadScheduledAtPropertyName !== "string") {
       this.settings.uploadScheduledAtPropertyName = DEFAULT_SETTINGS.uploadScheduledAtPropertyName;
+    }
+
+    if (typeof this.settings.writingStartedAtPropertyName !== "string") {
+      this.settings.writingStartedAtPropertyName = DEFAULT_SETTINGS.writingStartedAtPropertyName;
     }
   }
 
@@ -236,7 +245,18 @@ class CustomWordCounterPlugin extends Plugin {
   }
 
   getWritingStartedAt() {
-    const rawStartedAt = this.settings.writingStartedAt;
+    const view = this.getActiveMarkdownView();
+    if (!view || !view.file) {
+      return null;
+    }
+
+    const cache = this.app.metadataCache.getFileCache(view.file);
+    if (!cache || !cache.frontmatter) {
+      return null;
+    }
+
+    const propertyName = this.settings.writingStartedAtPropertyName || "writingStartedAt";
+    const rawStartedAt = cache.frontmatter[propertyName];
     if (!rawStartedAt || typeof rawStartedAt !== "string") {
       return null;
     }
@@ -577,26 +597,15 @@ class CustomWordCounterSettingTab extends PluginSettingTab {
         });
       });
 
-    // Writing started at (editable)
+    // Writing started at property name
     new Setting(containerEl)
-      .setName("Writing started at")
-      .setDesc("Set the start time for writing sessions (local datetime). Leave empty to disable.")
+      .setName("Writing started at property")
+      .setDesc("Frontmatter property name to store the writing session start time (e.g., writingStartedAt, sessionStart).")
       .addText((text) => {
-        text.inputEl.type = "datetime-local";
-        const raw = this.plugin.settings.writingStartedAt;
-        const toLocalInput = (iso) => {
-          try {
-            const d = new Date(iso);
-            const pad = (n) => String(n).padStart(2, "0");
-            return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
-          } catch (e) {
-            return "";
-          }
-        };
-
-        text.setValue(raw ? toLocalInput(raw) : "");
+        text.setPlaceholder("writingStartedAt");
+        text.setValue(this.plugin.settings.writingStartedAtPropertyName || "");
         text.onChange(async (value) => {
-          this.plugin.settings.writingStartedAt = value ? new Date(value).toISOString() : "";
+          this.plugin.settings.writingStartedAtPropertyName = value || DEFAULT_SETTINGS.writingStartedAtPropertyName;
           await this.plugin.saveSettings();
         });
       });
