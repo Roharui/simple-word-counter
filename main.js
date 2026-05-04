@@ -219,13 +219,44 @@ class CustomWordCounterPlugin extends Plugin {
     return scheduledAt;
   }
 
+  getTargetFrontmatterFile() {
+    const filterPropertyName = this.settings.filterPropertyName?.trim();
+    const filterPropertyValue = this.settings.filterPropertyValue?.trim();
+
+    if (!filterPropertyName || !filterPropertyValue) {
+      const view = this.getActiveMarkdownView();
+      return view?.file ?? null;
+    }
+
+    const markdownFiles = this.app.vault.getMarkdownFiles();
+    const activeFile = this.getActiveMarkdownView()?.file ?? null;
+
+    for (const file of markdownFiles) {
+      const cache = this.app.metadataCache.getFileCache(file);
+      if (!cache || !cache.frontmatter) {
+        continue;
+      }
+
+      const propertyValue = cache.frontmatter[filterPropertyName];
+      if (String(propertyValue) === filterPropertyValue) {
+        if (activeFile && file.path === activeFile.path) {
+          return file;
+        }
+
+        return file;
+      }
+    }
+
+    return activeFile;
+  }
+
   getFileUploadScheduledAt() {
-    const view = this.getActiveMarkdownView();
-    if (!view || !view.file) {
+    const file = this.getTargetFrontmatterFile();
+    if (!file) {
       return null;
     }
 
-    const cache = this.app.metadataCache.getFileCache(view.file);
+    const cache = this.app.metadataCache.getFileCache(file);
     if (!cache || !cache.frontmatter) {
       return null;
     }
@@ -245,12 +276,12 @@ class CustomWordCounterPlugin extends Plugin {
   }
 
   getWritingStartedAt() {
-    const view = this.getActiveMarkdownView();
-    if (!view || !view.file) {
+    const file = this.getTargetFrontmatterFile();
+    if (!file) {
       return null;
     }
 
-    const cache = this.app.metadataCache.getFileCache(view.file);
+    const cache = this.app.metadataCache.getFileCache(file);
     if (!cache || !cache.frontmatter) {
       return null;
     }
