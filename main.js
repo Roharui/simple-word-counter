@@ -4,6 +4,9 @@ const DEFAULT_SETTINGS = {
   excludeRegexPatterns: ["\\s"],
   targetCharacterCount: "",
   uploadScheduledAt: "",
+  filterPropertyName: "",
+  filterPropertyValue: "",
+  writingStartedAt: "",
 };
 
 class CustomWordCounterPlugin extends Plugin {
@@ -11,35 +14,45 @@ class CustomWordCounterPlugin extends Plugin {
     await this.loadSettings();
 
     this.counterRefreshTimer = window.setInterval(() => {
-      this.updateEditorCounter();
+      this.updateEditorCounter().catch(err => console.error("Counter update error:", err));
     }, 1000);
 
     this.addCommand({
       id: "show-character-count",
       name: "Show character count",
-      callback: () => {
-        const count = this.getCurrentCharacterCount();
+      callback: async () => {
+        const count = await this.getCurrentCharacterCount();
         const ratioText = this.getWeightedRatioText(count);
         new Notice(`Character count: ${count}${ratioText ? ` | Ratio: ${ratioText}` : ""}`);
+      },
+    });
+
+    this.addCommand({
+      id: "mark-writing-start",
+      name: "Mark writing start",
+      callback: async () => {
+        this.settings.writingStartedAt = new Date().toISOString();
+        await this.saveSettings();
+        new Notice("Writing start time saved.");
       },
     });
 
     this.addSettingTab(new CustomWordCounterSettingTab(this.app, this));
 
     this.registerEvent(
-      this.app.workspace.on("active-leaf-change", () => this.updateEditorCounter())
+      this.app.workspace.on("active-leaf-change", () => this.syncEditorCounters().catch(err => console.error("Counter update error:", err)))
     );
     this.registerEvent(
-      this.app.workspace.on("editor-change", () => this.updateEditorCounter())
+      this.app.workspace.on("editor-change", () => this.updateEditorCounter().catch(err => console.error("Counter update error:", err)))
     );
     this.registerEvent(
-      this.app.workspace.on("file-open", () => this.updateEditorCounter())
+      this.app.workspace.on("file-open", () => this.syncEditorCounters().catch(err => console.error("Counter update error:", err)))
     );
     this.registerEvent(
-      this.app.workspace.on("layout-change", () => this.updateEditorCounter())
+      this.app.workspace.on("layout-change", () => this.syncEditorCounters().catch(err => console.error("Counter update error:", err)))
     );
 
-    this.updateEditorCounter();
+    this.syncEditorCounters().catch(err => console.error("Counter update error:", err));
   }
 
   onunload() {
@@ -57,11 +70,20 @@ class CustomWordCounterPlugin extends Plugin {
     if (!Array.isArray(this.settings.excludeRegexPatterns)) {
       this.settings.excludeRegexPatterns = [...DEFAULT_SETTINGS.excludeRegexPatterns];
     }
+
+    if (typeof this.settings.writingStartedAt !== "string") {
+      this.settings.writingStartedAt = DEFAULT_SETTINGS.writingStartedAt;
+    }
   }
 
   async saveSettings() {
     await this.saveData(this.settings);
-    this.updateEditorCounter();
+    await this.updateEditorCounter();
+  }
+
+  async syncEditorCounters() {
+    this.clearAllEditorCounters();
+    await this.updateEditorCounter();
   }
 
   getActiveMarkdownView() {
@@ -77,14 +99,38 @@ class CustomWordCounterPlugin extends Plugin {
     return activeView.editor;
   }
 
-  getCurrentCharacterCount() {
-    const editor = this.getActiveEditor();
-    if (!editor) {
-      return 0;
+  async getCurrentCharacterCount() {
+    const filterPropertyName = this.settings.filterPropertyName?.trim();
+    const filterPropertyValue = this.settings.filterPropertyValue?.trim();
+
+    if (!filterPropertyName || !filterPropertyValue) {
+      // No filter: count only the active file
+      const editor = this.getActiveEditor();
+      if (!editor) {
+        return 0;
+      }
+      const text = editor.getValue();
+      return this.countCharacters(text);
     }
 
-    const text = editor.getValue();
-    return this.countCharacters(text);
+    // Filter enabled: count all files with matching frontmatter property
+    let totalCount = 0;
+    const markdownFiles = this.app.vault.getMarkdownFiles();
+
+    for (const file of markdownFiles) {
+      const cache = this.app.metadataCache.getFileCache(file);
+      if (!cache || !cache.frontmatter) {
+        continue;
+      }
+
+      const propertyValue = cache.frontmatter[filterPropertyName];
+      if (String(propertyValue) === filterPropertyValue) {
+        const content = await this.app.vault.read(file);
+        totalCount += this.countCharacters(content);
+      }
+    }
+
+    return totalCount;
   }
 
   countCharacters(text) {
@@ -133,6 +179,115 @@ class CustomWordCounterPlugin extends Plugin {
     }
 
     return scheduledAt;
+  }
+
+  getWritingStartedAt() {
+    const rawStartedAt = this.settings.writingStartedAt;
+    if (!rawStartedAt || typeof rawStartedAt !== "string") {
+      return null;
+    }
+
+    const startedAt = new Date(rawStartedAt);
+    if (Number.isNaN(startedAt.getTime())) {
+      return null;
+    }
+
+    return startedAt;
+  }
+
+  formatClockText(date) {
+    if (!(date instanceof Date) || Number.isNaN(date.getTime())) {
+      return null;
+    }
+
+    return date.toLocaleTimeString([], {
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+    });
+  }
+
+  getWritingSpeedText(characterCount) {
+    const startedAt = this.getWritingStartedAt();
+    if (!startedAt) {
+      return null;
+    }
+
+    const elapsedMilliseconds = Date.now() - startedAt.getTime();
+    if (elapsedMilliseconds <= 0) {
+      return null;
+    }
+
+    const charsPerHour = (characterCount * 3600000) / elapsedMilliseconds;
+    if (!Number.isFinite(charsPerHour)) {
+      return null;
+    }
+
+    return Number(charsPerHour.toFixed(1));
+  }
+
+  getRequiredCharsPerHour(characterCount) {
+    const target = this.getTargetCharacterCount();
+    const uploadAt = this.getUploadScheduledAt();
+    if (!target || !uploadAt) {
+      return null;
+    }
+
+    const remaining = target - characterCount;
+    if (remaining <= 0) {
+      return 0;
+    }
+
+    const remainingMs = uploadAt.getTime() - Date.now();
+    if (remainingMs <= 0) {
+      return null;
+    }
+
+    const hours = remainingMs / 3600000;
+    if (!Number.isFinite(hours) || hours <= 0) {
+      return null;
+    }
+
+    const perHour = remaining / hours;
+    return Number(perHour.toFixed(1));
+  }
+
+  getCrossingTime(characterCount) {
+    const startedAt = this.getWritingStartedAt();
+    const target = this.getTargetCharacterCount();
+    const uploadAt = this.getUploadScheduledAt();
+    if (!startedAt || !target || !uploadAt) {
+      return null;
+    }
+
+    const C = Number(characterCount || 0);
+    const R = target - C;
+    if (!Number.isFinite(C) || R <= 0) {
+      // Already met target or invalid
+      return new Date();
+    }
+
+    const E = Date.now() - startedAt.getTime();
+    const M = uploadAt.getTime() - Date.now();
+    if (E < 0 || M <= 0) {
+      return null;
+    }
+
+    const numerator = C * M - R * E;
+    const denom = C + R;
+    if (!Number.isFinite(numerator) || !Number.isFinite(denom) || denom === 0) {
+      return null;
+    }
+
+    const dt = numerator / denom; // milliseconds from now
+    if (dt <= 0) {
+      return new Date();
+    }
+    if (dt >= M) {
+      return null;
+    }
+
+    return new Date(Date.now() + dt);
   }
 
   getWeightedRatioValue(characterCount) {
@@ -217,7 +372,7 @@ class CustomWordCounterPlugin extends Plugin {
       const view = leaf.view;
       const scroller = view?.contentEl?.querySelector(".cm-scroller");
       scroller?.classList.remove("cwc-counter-anchor");
-      const counters = view?.contentEl?.querySelectorAll(".cwc-editor-counter");
+      const counters = view?.contentEl?.querySelectorAll(".cwc-editor-counter, .cwc-editor-counter-top");
       if (!counters) {
         continue;
       }
@@ -234,19 +389,24 @@ class CustomWordCounterPlugin extends Plugin {
 
     scrollerEl.classList.add("cwc-counter-anchor");
 
-    let counterEl = scrollerEl.querySelector(":scope > .cwc-editor-counter");
+    let speedEl = scrollerEl.querySelector(":scope > .cwc-editor-counter");
+    if (!speedEl) {
+      speedEl = document.createElement("div");
+      speedEl.className = "cwc-editor-counter";
+      scrollerEl.appendChild(speedEl);
+    }
+
+    let counterEl = scrollerEl.querySelector(":scope > .cwc-editor-counter-top");
     if (!counterEl) {
       counterEl = document.createElement("div");
-      counterEl.className = "cwc-editor-counter";
+      counterEl.className = "cwc-editor-counter-top";
       scrollerEl.appendChild(counterEl);
     }
 
-    return counterEl;
+    return { counterEl, speedEl };
   }
 
-  updateEditorCounter() {
-    this.clearAllEditorCounters();
-
+  async updateEditorCounter() {
     const view = this.getActiveMarkdownView();
     if (!view) {
       return;
@@ -258,19 +418,45 @@ class CustomWordCounterPlugin extends Plugin {
       return;
     }
 
-    const counterEl = this.ensureEditorCounterElement(view);
-    if (!counterEl) {
+    const els = this.ensureEditorCounterElement(view);
+    if (!els) {
       return;
     }
+    const { counterEl, speedEl } = els;
 
-    const count = this.countCharacters(editor.getValue());
-    const ratioText = this.getWeightedRatioText(count);
+    const count = await this.getCurrentCharacterCount();
+    const writingSpeed = this.getWritingSpeedText(count);
     const uploadScheduledAt = this.getUploadScheduledAt();
     const shouldWarn =
       uploadScheduledAt && uploadScheduledAt.getTime() < Date.now() && count < 3000;
+    const targetCount = this.getTargetCharacterCount();
+    const shouldSuccess = targetCount && count >= targetCount;
 
     counterEl.classList.toggle("cwc-editor-counter--warning", shouldWarn);
-    counterEl.setText(`${count}${ratioText ? ` | ${ratioText}` : ""}`);
+    counterEl.classList.toggle("cwc-editor-counter--success", shouldSuccess);
+
+    // Main counter text (bottom)
+    counterEl.setText(`${count} ${targetCount ? `/ ${targetCount}` : ""}`);
+
+    // Speed / requirement / crossing (top)
+    const speedParts = [];
+    if (writingSpeed) {
+      speedParts.push(`${writingSpeed} ch/h`);
+    }
+    const requiredSpeed = this.getRequiredCharsPerHour(count);
+    if (requiredSpeed === 0) {
+      speedParts.push(` 0 ch/h`);
+    } else if (requiredSpeed !== null) {
+      speedParts.push(` ${requiredSpeed} ch/h`);
+    }
+    const crossing = this.getCrossingTime(count);
+    if (crossing instanceof Date) {
+      const crossText = this.formatClockText(crossing);
+      if (crossText) {
+        speedParts.push(` ${crossText}`);
+      }
+    }
+    speedEl.setText(speedParts.join(' | '));
   }
 }
 
@@ -286,6 +472,32 @@ class CustomWordCounterSettingTab extends PluginSettingTab {
 
     containerEl.createEl("h2", { text: "Simple Word Counter" });
 
+    containerEl.createEl("h3", { text: "Target File" });
+
+    new Setting(containerEl)
+      .setName("Filter property name")
+      .setDesc("Leave empty to count only the active file. Or specify a frontmatter property name (e.g., 'category') to count all files with matching values.")
+      .addText((text) => {
+        text.setPlaceholder("Example: category");
+        text.setValue(this.plugin.settings.filterPropertyName || "");
+        text.onChange(async (value) => {
+          this.plugin.settings.filterPropertyName = value;
+          await this.plugin.saveSettings();
+        });
+      });
+
+    new Setting(containerEl)
+      .setName("Filter property value")
+      .setDesc("The value to match for the property above.")
+      .addText((text) => {
+        text.setPlaceholder("Example: writing");
+        text.setValue(this.plugin.settings.filterPropertyValue || "");
+        text.onChange(async (value) => {
+          this.plugin.settings.filterPropertyValue = value;
+          await this.plugin.saveSettings();
+        });
+      });
+
     containerEl.createEl("h3", { text: "Character Count" });
 
     new Setting(containerEl)
@@ -298,6 +510,30 @@ class CustomWordCounterSettingTab extends PluginSettingTab {
         text.setValue(this.plugin.settings.targetCharacterCount || "");
         text.onChange(async (value) => {
           this.plugin.settings.targetCharacterCount = value;
+          await this.plugin.saveSettings();
+        });
+      });
+
+    // Writing started at (editable)
+    new Setting(containerEl)
+      .setName("Writing started at")
+      .setDesc("Set the start time for writing sessions (local datetime). Leave empty to disable.")
+      .addText((text) => {
+        text.inputEl.type = "datetime-local";
+        const raw = this.plugin.settings.writingStartedAt;
+        const toLocalInput = (iso) => {
+          try {
+            const d = new Date(iso);
+            const pad = (n) => String(n).padStart(2, "0");
+            return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+          } catch (e) {
+            return "";
+          }
+        };
+
+        text.setValue(raw ? toLocalInput(raw) : "");
+        text.onChange(async (value) => {
+          this.plugin.settings.writingStartedAt = value ? new Date(value).toISOString() : "";
           await this.plugin.saveSettings();
         });
       });

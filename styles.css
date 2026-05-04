@@ -39,6 +39,27 @@
   border-color: #e74c3c;
 }
 
+.cwc-editor-counter--success {
+  border-color: #27ae60;
+}
+
+.cwc-editor-counter-top {
+  position: fixed;
+  right: 5px;
+  bottom: 40px;
+  z-index: 20;
+  width: fit-content;
+  margin: 0;
+  padding: 3px 10px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 999px;
+  font-size: var(--font-ui-small);
+  color: var(--text-muted);
+  background: var(--background-secondary);
+  user-select: none;
+  pointer-events: none;
+}
+
 .cwc-counter-anchor {
   position: relative;
 }
