@@ -265,7 +265,12 @@ class CustomWordCounterPlugin extends Plugin {
 
     const count = this.countCharacters(editor.getValue());
     const ratioText = this.getWeightedRatioText(count);
-    counterEl.setText(`Chars: ${count}${ratioText ? ` | ${ratioText}` : ""}`);
+    const uploadScheduledAt = this.getUploadScheduledAt();
+    const shouldWarn =
+      uploadScheduledAt && uploadScheduledAt.getTime() < Date.now() && count < 3000;
+
+    counterEl.classList.toggle("cwc-editor-counter--warning", shouldWarn);
+    counterEl.setText(`${count}${ratioText ? ` | ${ratioText}` : ""}`);
   }
 }
 
@@ -281,6 +286,8 @@ class CustomWordCounterSettingTab extends PluginSettingTab {
 
     containerEl.createEl("h2", { text: "Simple Word Counter" });
 
+    containerEl.createEl("h3", { text: "Character Count" });
+
     new Setting(containerEl)
       .setName("Target character count")
       .setDesc("Used together with the upload time to calculate the displayed ratio.")
@@ -295,6 +302,8 @@ class CustomWordCounterSettingTab extends PluginSettingTab {
         });
       });
 
+    containerEl.createEl("h3", { text: "Upload Time" });
+
     new Setting(containerEl)
       .setName("Upload scheduled time")
       .setDesc("Choose today's planned upload time used in the ratio calculation.")
@@ -306,6 +315,8 @@ class CustomWordCounterSettingTab extends PluginSettingTab {
           await this.plugin.saveSettings();
         });
       });
+
+    containerEl.createEl("h3", { text: "Regex Patterns" });
 
     new Setting(containerEl)
       .setName("Excluded regex patterns")
@@ -322,6 +333,9 @@ class CustomWordCounterSettingTab extends PluginSettingTab {
             renderRows();
           });
       });
+
+
+    containerEl.createEl("h3", { text: "Regex Pattern List" });
 
     const helpEl = containerEl.createEl("div", {
       cls: "cwc-regex-help",

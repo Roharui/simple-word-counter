@@ -35,6 +35,10 @@
   pointer-events: none;
 }
 
+.cwc-editor-counter--warning {
+  border-color: #e74c3c;
+}
+
 .cwc-counter-anchor {
   position: relative;
 }
