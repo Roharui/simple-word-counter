@@ -1,4 +1,4 @@
-const { Plugin, PluginSettingTab, Setting, Notice, MarkdownView } = require("obsidian");
+const { Plugin, PluginSettingTab, Setting, Notice, MarkdownView, Modal } = require("obsidian");
 
 const DEFAULT_SETTINGS = {
   excludeRegexPatterns: ["\\s"],
@@ -10,6 +10,8 @@ const DEFAULT_SETTINGS = {
   writingStartedAtPropertyName: "writingStartedAt",
   enableFileInfoUpload: false,
   fileInfoServerIp: "",
+  deviceAlias: "",
+  breakTimeThreshold: 20,
   use24HourFormat: true,
 };
 
@@ -22,6 +24,16 @@ class CustomWordCounterPlugin extends Plugin {
     }, 1000);
 
     this.refreshFileInfoUploadTimer();
+    this.refreshInactivityTimer();
+
+    this.registerEvent(
+      this.app.workspace.on("editor-change", () => {
+        this.lastInputAt = Date.now();
+        if (this.breakModalShown) {
+          this.breakModalShown = false;
+        }
+      })
+    );
 
     this.addCommand({
       id: "show-character-count",
@@ -81,6 +93,11 @@ class CustomWordCounterPlugin extends Plugin {
       this.fileInfoUploadTimer = null;
     }
 
+    if (this.inactivityTimer) {
+      window.clearInterval(this.inactivityTimer);
+      this.inactivityTimer = null;
+    }
+
     this.clearAllEditorCounters();
   }
 
@@ -109,6 +126,14 @@ class CustomWordCounterPlugin extends Plugin {
 
     if (typeof this.settings.fileInfoServerIp !== "string") {
       this.settings.fileInfoServerIp = DEFAULT_SETTINGS.fileInfoServerIp;
+    }
+
+    if (typeof this.settings.deviceAlias !== "string") {
+      this.settings.deviceAlias = DEFAULT_SETTINGS.deviceAlias;
+    }
+
+    if (typeof this.settings.breakTimeThreshold !== "number") {
+      this.settings.breakTimeThreshold = DEFAULT_SETTINGS.breakTimeThreshold;
     }
 
     if (typeof this.settings.use24HourFormat !== "boolean") {
@@ -174,6 +199,52 @@ class CustomWordCounterPlugin extends Plugin {
     }
   }
 
+  getBreakApiUrl() {
+    const rawAddress = this.settings.fileInfoServerIp?.trim();
+    if (!rawAddress) {
+      return null;
+    }
+
+    try {
+      const normalizedAddress = /^https?:\/\//i.test(rawAddress) ? rawAddress : `http://${rawAddress}`;
+      const url = new URL(normalizedAddress);
+      url.pathname = "/api/break";
+
+      return url.toString();
+    } catch (_error) {
+      return null;
+    }
+  }
+
+  refreshInactivityTimer() {
+    if (this.inactivityTimer) {
+      window.clearInterval(this.inactivityTimer);
+      this.inactivityTimer = null;
+    }
+
+    this.lastInputAt = Date.now();
+    this.breakModalShown = false;
+
+    this.inactivityTimer = window.setInterval(() => {
+      this.checkInactivity().catch(err => console.error("Inactivity check error:", err));
+    }, 60000);
+  }
+
+  async checkInactivity() {
+    if (this.breakModalShown) {
+      return;
+    }
+
+    const inactiveMs = Date.now() - (this.lastInputAt || 0);
+    const thresholdMinutes = this.settings.breakTimeThreshold || 20;
+    const threshold = thresholdMinutes * 60 * 1000;
+    if (inactiveMs >= threshold) {
+      this.breakModalShown = true;
+      const startAt = new Date(this.lastInputAt || Date.now());
+      new BreakReasonModal(this.app, this, startAt).open();
+    }
+  }
+
   async uploadActiveFileInfo() {
     if (!this.settings.enableFileInfoUpload) {
       return;
@@ -203,6 +274,7 @@ class CustomWordCounterPlugin extends Plugin {
       writing_speed,
       min_required_speed,
       spare_time,
+      device_alias: this.settings.deviceAlias || null,
     };
 
     const response = await fetch(serverUrl, {
@@ -215,6 +287,38 @@ class CustomWordCounterPlugin extends Plugin {
 
     if (!response.ok) {
       throw new Error(`Server returned ${response.status}`);
+    }
+  }
+
+  async sendBreak(reason, startAtIso, endAtIso) {
+    const serverUrl = this.getBreakApiUrl();
+    if (!serverUrl) {
+      new Notice("Break API 서버 주소가 설정되어있지 않습니다.");
+      return;
+    }
+
+    const payload = {
+      reason: reason || "",
+      start_at: startAtIso,
+      end_at: endAtIso,
+      device_alias: this.settings.deviceAlias || null,
+    };
+
+    try {
+      const response = await fetch(serverUrl, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+
+      if (!response.ok) {
+        throw new Error(`Server returned ${response.status}`);
+      }
+
+      new Notice("Break을 서버로 전송했습니다.");
+    } catch (err) {
+      console.error("Break upload error:", err);
+      new Notice(`Break 전송 실패: ${err.message}`);
     }
   }
 
@@ -734,6 +838,33 @@ class CustomWordCounterSettingTab extends PluginSettingTab {
         });
       });
 
+    new Setting(containerEl)
+      .setName("Device alias")
+      .setDesc("A friendly name for this device to include with uploads.")
+      .addText((text) => {
+        text.setPlaceholder("e.g., My MacBook, Office PC");
+        text.setValue(this.plugin.settings.deviceAlias || "");
+        text.onChange(async (value) => {
+          this.plugin.settings.deviceAlias = value;
+          await this.plugin.saveSettings();
+        });
+      });
+
+    new Setting(containerEl)
+      .setName("Break time threshold (minutes)")
+      .setDesc("Show break modal after N minutes of inactivity.")
+      .addText((text) => {
+        text.inputEl.type = "number";
+        text.inputEl.min = "1";
+        text.setPlaceholder("20");
+        text.setValue(String(this.plugin.settings.breakTimeThreshold || 20));
+        text.onChange(async (value) => {
+          const num = parseInt(value);
+          this.plugin.settings.breakTimeThreshold = Number.isFinite(num) && num > 0 ? num : 20;
+          await this.plugin.saveSettings();
+        });
+      });
+
     containerEl.createEl("h3", { text: "Target File" });
 
     new Setting(containerEl)
@@ -884,6 +1015,54 @@ class CustomWordCounterSettingTab extends PluginSettingTab {
 
     renderRows();
 
+  }
+}
+
+class BreakReasonModal extends Modal {
+  constructor(app, plugin, startAt) {
+    super(app);
+    this.plugin = plugin;
+    this.startAt = startAt;
+  }
+
+  onOpen() {
+    const { contentEl } = this;
+    contentEl.empty();
+
+    contentEl.createEl("h2", { text: "잠깐 쉬셨나요?" });
+    contentEl.createEl("p", { text: "글을 쓰지 않으신 이유를 입력해주세요." });
+
+    const textarea = contentEl.createEl("textarea");
+    textarea.style.width = "100%";
+    textarea.style.height = "100px";
+
+    const actions = contentEl.createDiv({ cls: "cwc-break-actions" });
+
+    const submit = actions.createEl("button", { text: "전송" });
+    const cancel = actions.createEl("button", { text: "취소" });
+
+    submit.addEventListener("click", async () => {
+      const reason = textarea.value.trim();
+      if (!reason) {
+        new Notice("사유를 입력해주세요.");
+        return;
+      }
+
+      const startIso = this.startAt instanceof Date ? this.startAt.toISOString() : new Date().toISOString();
+      const endIso = new Date().toISOString();
+
+      await this.plugin.sendBreak(reason, startIso, endIso);
+      this.close();
+    });
+
+    cancel.addEventListener("click", () => this.close());
+  }
+
+  onClose() {
+    const { contentEl } = this;
+    contentEl.empty();
+    this.plugin.breakModalShown = false;
+    this.plugin.lastInputAt = Date.now();
   }
 }
 
