@@ -10,6 +10,7 @@ const DEFAULT_SETTINGS = {
   writingStartedAtPropertyName: "writingStartedAt",
   enableFileInfoUpload: false,
   fileInfoServerIp: "",
+  use24HourFormat: true,
 };
 
 class CustomWordCounterPlugin extends Plugin {
@@ -109,6 +110,10 @@ class CustomWordCounterPlugin extends Plugin {
     if (typeof this.settings.fileInfoServerIp !== "string") {
       this.settings.fileInfoServerIp = DEFAULT_SETTINGS.fileInfoServerIp;
     }
+
+    if (typeof this.settings.use24HourFormat !== "boolean") {
+      this.settings.use24HourFormat = DEFAULT_SETTINGS.use24HourFormat;
+    }
   }
 
   async saveSettings() {
@@ -184,9 +189,20 @@ class CustomWordCounterPlugin extends Plugin {
     const cache = this.app.metadataCache.getFileCache(file);
     const count = await this.getCurrentCharacterCount();
 
+    const startedAt = this.getWritingStartedAt();
+    const writing_time = startedAt ? Date.now() - startedAt.getTime() : null; // milliseconds
+    const writing_speed = this.getWritingSpeedText(count);
+    const min_required_speed = this.getRequiredCharsPerHour(count);
+    const crossingTime = this.getCrossingTime(count);
+    const spare_time = crossingTime ? crossingTime.getTime() - Date.now() : null; // milliseconds until crossing time
+
     const payload = {
       file_name: file.basename,
       char_count: count,
+      writing_time,
+      writing_speed,
+      min_required_speed,
+      spare_time,
     };
 
     const response = await fetch(serverUrl, {
@@ -406,6 +422,7 @@ class CustomWordCounterPlugin extends Plugin {
       hour: "2-digit",
       minute: "2-digit",
       second: "2-digit",
+      hour12: !this.settings.use24HourFormat,
     });
   }
 
@@ -768,6 +785,19 @@ class CustomWordCounterSettingTab extends PluginSettingTab {
         text.setValue(this.plugin.settings.writingStartedAtPropertyName || "");
         text.onChange(async (value) => {
           this.plugin.settings.writingStartedAtPropertyName = value || DEFAULT_SETTINGS.writingStartedAtPropertyName;
+          await this.plugin.saveSettings();
+        });
+      });
+
+    containerEl.createEl("h3", { text: "Time Format" });
+
+    new Setting(containerEl)
+      .setName("Use 24-hour format")
+      .setDesc("Choose between 24-hour format (e.g., 14:30:45) and 12-hour format (e.g., 2:30:45 PM).")
+      .addToggle((toggle) => {
+        toggle.setValue(!!this.plugin.settings.use24HourFormat);
+        toggle.onChange(async (value) => {
+          this.plugin.settings.use24HourFormat = value;
           await this.plugin.saveSettings();
         });
       });
