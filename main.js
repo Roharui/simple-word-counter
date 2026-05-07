@@ -238,7 +238,7 @@ class CustomWordCounterPlugin extends Plugin {
     const inactiveMs = Date.now() - (this.lastInputAt || 0);
     const thresholdMinutes = this.settings.breakTimeThreshold || 20;
     const threshold = thresholdMinutes * 60 * 1000;
-    if (inactiveMs >= threshold) {
+    if (inactiveMs >= threshold && this.getFileCharacterCount(this.getTargetFrontmatterFile()) < this.settings.targetCharacterCount) {
       this.breakModalShown = true;
       const startAt = new Date(this.lastInputAt || Date.now());
       new BreakReasonModal(this.app, this, startAt).open();
@@ -298,6 +298,7 @@ class CustomWordCounterPlugin extends Plugin {
     }
 
     const payload = {
+      file_name: this.getTargetFrontmatterFile()?.basename,
       reason: reason || "",
       start_at: startAtIso,
       end_at: endAtIso,
