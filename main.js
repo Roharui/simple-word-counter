@@ -3,8 +3,10 @@ const { Plugin, PluginSettingTab, Setting, Notice, MarkdownView, Modal } = requi
 const DEFAULT_SETTINGS = {
   excludeRegexPatterns: ["\\s"],
   targetCharacterCount: "",
+  showSpeed: true,
   uploadScheduledAt: "",
   uploadScheduledAtPropertyName: "uploadScheduledAt",
+  targetCharacterCountPropertyName: "targetCharacterCount",
   filterPropertyName: "",
   filterPropertyValue: "",
   writingStartedAtPropertyName: "writingStartedAt",
@@ -42,6 +44,17 @@ class CustomWordCounterPlugin extends Plugin {
         const count = await this.getCurrentCharacterCount();
         const ratioText = this.getWeightedRatioText(count);
         new Notice(`Character count: ${count}${ratioText ? ` | Ratio: ${ratioText}` : ""}`);
+      },
+    });
+
+    this.addCommand({
+      id: "toggle-speed-display",
+      name: "Toggle speed display",
+      callback: async () => {
+        this.settings.showSpeed = !this.settings.showSpeed;
+        await this.saveSettings();
+        new Notice(`Speed display ${this.settings.showSpeed ? "enabled" : "disabled"}`);
+        this.updateEditorCounter().catch(err => console.error("Counter update error:", err));
       },
     });
 
@@ -120,6 +133,10 @@ class CustomWordCounterPlugin extends Plugin {
       this.settings.writingStartedAtPropertyName = DEFAULT_SETTINGS.writingStartedAtPropertyName;
     }
 
+    if (typeof this.settings.targetCharacterCountPropertyName !== "string") {
+      this.settings.targetCharacterCountPropertyName = DEFAULT_SETTINGS.targetCharacterCountPropertyName;
+    }
+
     if (typeof this.settings.enableFileInfoUpload !== "boolean") {
       this.settings.enableFileInfoUpload = DEFAULT_SETTINGS.enableFileInfoUpload;
     }
@@ -138,6 +155,10 @@ class CustomWordCounterPlugin extends Plugin {
 
     if (typeof this.settings.use24HourFormat !== "boolean") {
       this.settings.use24HourFormat = DEFAULT_SETTINGS.use24HourFormat;
+    }
+
+    if (typeof this.settings.showSpeed !== "boolean") {
+      this.settings.showSpeed = DEFAULT_SETTINGS.showSpeed;
     }
   }
 
@@ -365,6 +386,18 @@ class CustomWordCounterPlugin extends Plugin {
   }
 
   getTargetCharacterCount() {
+    const propertyName = this.settings.targetCharacterCountPropertyName?.trim();
+    const file = this.getTargetFrontmatterFile();
+
+    if (propertyName && file) {
+      const cache = this.app.metadataCache.getFileCache(file);
+      const raw = cache?.frontmatter?.[propertyName];
+      const fromFile = Number(raw);
+      if (Number.isFinite(fromFile) && fromFile > 0) {
+        return fromFile;
+      }
+    }
+
     const rawTarget = this.settings.targetCharacterCount;
     const target = Number(rawTarget);
 
@@ -542,7 +575,10 @@ class CustomWordCounterPlugin extends Plugin {
       return null;
     }
 
-    const charsPerHour = (characterCount * 3600000) / elapsedMilliseconds;
+    // 최소 1시간(3600000ms)이 되도록 보정
+    const calculationTime = Math.max(elapsedMilliseconds, 3600000);
+
+    const charsPerHour = (characterCount * 3600000) / calculationTime;
     if (!Number.isFinite(charsPerHour)) {
       return null;
     }
@@ -746,7 +782,12 @@ class CustomWordCounterPlugin extends Plugin {
     if (!els) {
       return;
     }
-    const { counterEl, speedEl } = els;
+
+    // Explicit element roles:
+    // topArea -> .cwc-editor-counter-top (positioned above)
+    // bottomArea -> .cwc-editor-counter (positioned at bottom)
+    const topArea = els.counterEl;
+    const bottomArea = els.speedEl;
 
     const count = await this.getCurrentCharacterCount();
     const writingSpeed = this.getWritingSpeedText(count);
@@ -754,49 +795,57 @@ class CustomWordCounterPlugin extends Plugin {
     const uploadScheduledAt = this.getFileUploadScheduledAt() || this.getUploadScheduledAt();
     const targetCount = this.getTargetCharacterCount();
 
-    const shouldWarn =
-      uploadScheduledAt && uploadScheduledAt.getTime() < Date.now() && count < targetCount;
+    const shouldWarn = uploadScheduledAt && uploadScheduledAt.getTime() < Date.now() && count < targetCount;
     const shouldSuccess = targetCount && count >= targetCount;
 
-    counterEl.classList.toggle("cwc-editor-counter--warning", shouldWarn);
-    counterEl.classList.toggle("cwc-editor-counter--success", shouldSuccess);
-    speedEl.classList.toggle("cwc-editor-counter--warning", shouldWarn);
-    speedEl.classList.toggle("cwc-editor-counter--success", shouldSuccess);
+    topArea.classList.toggle("cwc-editor-counter--warning", shouldWarn);
+    topArea.classList.toggle("cwc-editor-counter--success", shouldSuccess);
+    bottomArea.classList.toggle("cwc-editor-counter--warning", shouldWarn);
+    bottomArea.classList.toggle("cwc-editor-counter--success", shouldSuccess);
 
-    // Main counter text (bottom)
-    counterEl.setText(`${count} ${targetCount ? `/ ${targetCount}` : ""}`);
+    const counterText = `${count} ${targetCount ? `/ ${targetCount}` : ""}`;
 
-    // Speed / requirement / crossing (top)
-    const speedParts = [];
-
-    if (writingSpeed !== null) {
-      speedParts.push(`${writingSpeed} ch/h`);
-    }
-
-    const requiredSpeed = this.getRequiredCharsPerHour(count);
-
-    if (requiredSpeed === 0) {
-      speedParts.push(` 0 ch/h`);
-    } else if (requiredSpeed !== null) {
-      speedParts.push(` ${requiredSpeed} ch/h`);
-    }
-
-    const crossing = this.getCrossingTime(count);
-
-    if (requiredSpeed && writingSpeed !== null && requiredSpeed > writingSpeed) {
-      speedParts.push('⚠️');
-    } else if (crossing instanceof Date) {
-      const crossText = this.formatClockText(crossing);
-
-      if (crossText) {
-        speedParts.push(` ${crossText}`);
-      }
-    }
-
-    if (shouldSuccess) {
-      speedEl.setText("✅");
+    if (!this.settings.showSpeed) {
+      // When speed is hidden, show the character count in the top area (where speed would appear), hide bottom.
+      topArea.setText("");
+      topArea.style.display = "none";
+      
+      bottomArea.style.display = "";
+      bottomArea.setText(counterText);
     } else {
-      speedEl.setText(speedParts.join(' | '));
+      // When speed is shown, top shows speed/info and bottom shows the character count.
+      bottomArea.style.display = "";
+      bottomArea.setText(counterText);
+
+      topArea.style.display = "";
+
+      const speedParts = [];
+      if (writingSpeed !== null) {
+        speedParts.push(`${writingSpeed} ch/h`);
+      }
+
+      const requiredSpeed = this.getRequiredCharsPerHour(count);
+      if (requiredSpeed === 0) {
+        speedParts.push(` 0 ch/h`);
+      } else if (requiredSpeed !== null) {
+        speedParts.push(` ${requiredSpeed} ch/h`);
+      }
+
+      const crossing = this.getCrossingTime(count);
+      if (requiredSpeed && writingSpeed !== null && requiredSpeed > writingSpeed) {
+        speedParts.push('⚠️');
+      } else if (crossing instanceof Date) {
+        const crossText = this.formatClockText(crossing);
+        if (crossText) {
+          speedParts.push(` ${crossText}`);
+        }
+      }
+
+      if (shouldSuccess) {
+        topArea.setText("✅");
+      } else {
+        topArea.setText(speedParts.join(' | '));
+      }
     }
   }
 }
@@ -908,6 +957,18 @@ class CustomWordCounterSettingTab extends PluginSettingTab {
         });
       });
 
+    new Setting(containerEl)
+      .setName("Target character count property")
+      .setDesc("Frontmatter property name for per-file target character count (e.g., targetCharacterCount). If set and present in the file, it will override the global target.")
+      .addText((text) => {
+        text.setPlaceholder("targetCharacterCount");
+        text.setValue(this.plugin.settings.targetCharacterCountPropertyName || "");
+        text.onChange(async (value) => {
+          this.plugin.settings.targetCharacterCountPropertyName = value || DEFAULT_SETTINGS.targetCharacterCountPropertyName;
+          await this.plugin.saveSettings();
+        });
+      });
+
     // Writing started at property name
     new Setting(containerEl)
       .setName("Writing started at property")
@@ -930,6 +991,17 @@ class CustomWordCounterSettingTab extends PluginSettingTab {
         toggle.setValue(!!this.plugin.settings.use24HourFormat);
         toggle.onChange(async (value) => {
           this.plugin.settings.use24HourFormat = value;
+          await this.plugin.saveSettings();
+        });
+      });
+
+    new Setting(containerEl)
+      .setName("Show speed display")
+      .setDesc("Toggle whether writing speed / required speed is shown above the counter.")
+      .addToggle((toggle) => {
+        toggle.setValue(!!this.plugin.settings.showSpeed);
+        toggle.onChange(async (value) => {
+          this.plugin.settings.showSpeed = value;
           await this.plugin.saveSettings();
         });
       });
@@ -959,6 +1031,7 @@ class CustomWordCounterSettingTab extends PluginSettingTab {
           await this.plugin.saveSettings();
         });
       });
+
 
     containerEl.createEl("h3", { text: "Regex Patterns" });
 
