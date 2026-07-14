@@ -6,5 +6,6 @@
   "description": "Count characters in the current note, with configurable regex exclusions and optional target character count.",
   "author": "roharui",
   "authorUrl": "",
-  "isDesktopOnly": false
+  "isDesktopOnly": false,
+  "repo": "Roharui/simple-word-counter"
 }
