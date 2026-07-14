@@ -18,6 +18,19 @@
   margin-top: 4px;
 }
 
+.cwc-editor-counter:hover {
+  opacity: 1;
+}
+
+body.is-cwc-counter-visible .cwc-editor-counter {
+  opacity: 1;
+}
+
+.cwc-editor-counter.cwc-over-target {
+  border-color: #8bc34a;
+  border-width: 2px;
+}
+
 .cwc-editor-counter {
   position: fixed;
   right: 5px;
@@ -32,15 +45,7 @@
   color: var(--text-muted);
   background: var(--background-secondary);
   user-select: none;
-  pointer-events: none;
+  pointer-events: auto;
   opacity: 0;
   transition: opacity 0.2s ease;
-}
-
-.cwc-counter-anchor:hover .cwc-editor-counter {
-  opacity: 1;
-}
-
-.cwc-counter-anchor {
-  position: relative;
 }

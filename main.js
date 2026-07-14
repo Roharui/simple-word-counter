@@ -4,11 +4,13 @@ const DEFAULT_SETTINGS = {
   excludeRegexPatterns: ["\\s"],
   targetCharacterCount: "",
   targetFilePath: "",
+  counterHoverOnly: true,
 };
 
 class CustomWordCounterPlugin extends Plugin {
   async onload() {
     await this.loadSettings();
+    this.updateBodyClass();
 
     this.counterRefreshTimer = window.setInterval(() => {
       this.updateEditorCounter().catch(err => console.error("Counter update error:", err));
@@ -42,6 +44,16 @@ class CustomWordCounterPlugin extends Plugin {
       },
     });
 
+    this.addCommand({
+      id: "toggle-counter-hover",
+      name: "Toggle counter hover visibility",
+      callback: async () => {
+        this.settings.counterHoverOnly = !this.settings.counterHoverOnly;
+        await this.saveSettings();
+        new Notice(`Counter hover visibility: ${this.settings.counterHoverOnly ? "On" : "Off"}`);
+      },
+    });
+
     this.addSettingTab(new CustomWordCounterSettingTab(this.app, this));
 
     this.registerEvent(
@@ -67,6 +79,7 @@ class CustomWordCounterPlugin extends Plugin {
     }
 
     this.clearAllEditorCounters();
+    document.body.classList.remove("is-cwc-counter-visible");
   }
 
   async loadSettings() {
@@ -79,7 +92,16 @@ class CustomWordCounterPlugin extends Plugin {
 
   async saveSettings() {
     await this.saveData(this.settings);
+    this.updateBodyClass();
     await this.updateEditorCounter();
+  }
+
+  updateBodyClass() {
+    if (this.settings.counterHoverOnly) {
+      document.body.classList.remove("is-cwc-counter-visible");
+    } else {
+      document.body.classList.add("is-cwc-counter-visible");
+    }
   }
 
   async syncEditorCounters() {
@@ -239,9 +261,16 @@ class CustomWordCounterPlugin extends Plugin {
 
     const count = await this.getCurrentCharacterCount();
     const targetCount = this.getTargetCharacterCount();
+    const overTarget = targetCount && count > targetCount;
 
     const counterText = `${count} ${targetCount ? `/ ${targetCount}` : ""}`;
     counterEl.setText(counterText);
+
+    if (overTarget) {
+      counterEl.classList.add("cwc-over-target");
+    } else {
+      counterEl.classList.remove("cwc-over-target");
+    }
   }
 }
 
@@ -283,6 +312,17 @@ class CustomWordCounterSettingTab extends PluginSettingTab {
         text.setValue(this.plugin.settings.targetCharacterCount || "");
         text.onChange(async (value) => {
           this.plugin.settings.targetCharacterCount = value;
+          await this.plugin.saveSettings();
+        });
+      });
+
+    new Setting(containerEl)
+      .setName("Require hover to show counter")
+      .setDesc("When enabled, the character counter is hidden until you hover over it.")
+      .addToggle((toggle) => {
+        toggle.setValue(this.plugin.settings.counterHoverOnly);
+        toggle.onChange(async (value) => {
+          this.plugin.settings.counterHoverOnly = value;
           await this.plugin.saveSettings();
         });
       });
