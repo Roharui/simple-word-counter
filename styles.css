@@ -33,32 +33,12 @@
   background: var(--background-secondary);
   user-select: none;
   pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.2s ease;
 }
 
-.cwc-editor-counter--warning {
-  border-color: #e74c3c !important;
-}
-
-.cwc-editor-counter--success {
-  border-color: #27ae60 !important;
-  box-shadow: 0 0 0 1px rgba(39, 174, 96, 0.35) inset;
-}
-
-.cwc-editor-counter-top {
-  position: fixed;
-  right: 5px;
-  bottom: 40px;
-  z-index: 20;
-  width: fit-content;
-  margin: 0;
-  padding: 3px 10px;
-  border: 1px solid var(--background-modifier-border);
-  border-radius: 999px;
-  font-size: var(--font-ui-small);
-  color: var(--text-muted);
-  background: var(--background-secondary);
-  user-select: none;
-  pointer-events: none;
+.cwc-counter-anchor:hover .cwc-editor-counter {
+  opacity: 1;
 }
 
 .cwc-counter-anchor {
